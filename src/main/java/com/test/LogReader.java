@@ -1,8 +1,10 @@
 package com.test;
 
 import ch.qos.logback.classic.Logger;
-import com.test.domain.EventLog;
 import com.test.domain.EventLogRepository;
+import com.test.service.EventLogService;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.LineIterator;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
@@ -13,7 +15,6 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 import java.io.*;
-import java.util.List;
 
 /**
  * Created by Jakub on 24.09.2019.
@@ -35,8 +36,7 @@ public class LogReader implements CommandLineRunner {
             readFile(strings[1]);
         }else{
             logger.error("Empty param string");
-            //throw new IllegalArgumentException("Need path to log file.");
-            readFile("src\\testFiles\\logfile.txt");
+            throw new IllegalArgumentException("No path to log file.");
         }
     }
 
@@ -46,66 +46,42 @@ public class LogReader implements CommandLineRunner {
 
     public void readFile(String pathFile){
         JSONParser jsonParser = new JSONParser();
-
         logger.info("File to read : " + pathFile);
 
-
         logger.debug("Start reading file");
-        try(BufferedReader reader = new BufferedReader(new FileReader(pathFile))) {
-            String stringMain = null;
-            JSONObject eventLogJson = null;
-            while(reader.ready()){
-                stringMain = reader.readLine();
-                while (!stringMain.matches("[{].*[}]")) {
-                    stringMain += reader.readLine();
+        try(LineIterator lineIterator = FileUtils.lineIterator(new File(pathFile),"UTF-8")){
+            String string = null;
+            while (lineIterator.hasNext()){
+                string = lineIterator.next();
+                try {
+                    JSONObject eventLogJson = (JSONObject) jsonParser.parse(string);
+                    logger.debug("Read JSON from file : " + eventLogJson.toJSONString());
+                    //EventLogService.processLogEntry(eventLogJson, eventLogRepository);
+                    (new Thread(new ProcessLogEntryRunnable(eventLogJson))).start();
+                } catch (ParseException e) {
+                    //e.printStackTrace();
+                    logger.error(e.toString());
                 }
-
-                eventLogJson = (JSONObject) jsonParser.parse(stringMain);
-                logger.debug("Read JSON from file : " + eventLogJson.toJSONString());
-
-                processLogEntry(eventLogJson, eventLogRepository);
             }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
         } catch (IOException e) {
-            e.printStackTrace();
-        } catch (ParseException e) {
             e.printStackTrace();
         }
         logger.debug("Finished reading file");
     }
 
-    public static void processLogEntry(JSONObject eventLogJson,EventLogRepository eventLogRep){
-        EventLog eventLog = null;
-        List<EventLog> lst = eventLogRep.findByIdLog((String)eventLogJson.get("id"));
-        if(!lst.isEmpty()){
-            eventLog = lst.get(0);
-            switch ( (String)eventLogJson.get("state") ){
-                case "STARTED":
-                    eventLog.setTimestamp_started((Long)eventLogJson.get("timestamp"));
-                    break;
-                case "FINISHED":
-                    eventLog.setTimestamp_finished((Long)eventLogJson.get("timestamp"));
-                    break;
-            }
-            eventLog.setTime_duration(eventLog.getTimestamp_finished()-eventLog.getTimestamp_started());
-            eventLog.setAlert(Long.compare(eventLog.getTime_duration(),4)==1);
-        }else{
-            eventLog = new EventLog();
-            eventLog.setIdLog((String)eventLogJson.get("id"));
-            switch ((String)eventLogJson.get("state")){
-                case "STARTED":
-                    eventLog.setTimestamp_started((Long)eventLogJson.get("timestamp"));
-                    break;
-                case "FINISHED":
-                    eventLog.setTimestamp_finished((Long)eventLogJson.get("timestamp"));
-                    break;
+    private class ProcessLogEntryRunnable implements Runnable{
+        JSONObject eventLogJson;
+        public ProcessLogEntryRunnable(JSONObject eventLogJson){
+            this.eventLogJson = eventLogJson;
+        }
+        @Override
+        public void run() {
+            try {
+                EventLogService.processLogEntry(eventLogJson, eventLogRepository);
+            } catch (InterruptedException e) {
+                //e.printStackTrace();
+                logger.error(e.toString());
             }
         }
-        if (eventLogJson.get("host")!=null && !eventLogJson.get("host").equals(""))
-            eventLog.setHost((String)eventLogJson.get("host"));
-        if (eventLogJson.get("type")!=null && !eventLogJson.get("type").equals(""))
-            eventLog.setType((String)eventLogJson.get("type"));
-        eventLogRep.save(eventLog);
     }
 }
