@@ -24,7 +24,7 @@ public class EventLog {
     @Column(columnDefinition = "boolean default false")
     private boolean alert;
 
-    public EventLog() {  }
+    public EventLog() {}
 
     public EventLog(long id, String idLog, long timestamp_started, long timestamp_finished, long time_duration, String type, String host, boolean alert) {
         this.id = id;

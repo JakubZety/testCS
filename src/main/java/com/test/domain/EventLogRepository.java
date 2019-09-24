@@ -9,4 +9,5 @@ import java.util.List;
  */
 public interface EventLogRepository extends CrudRepository<EventLog, Long>{
     List<EventLog> findByIdLog(String idLog);
+    void deleteByIdLog(String idLog);
 }

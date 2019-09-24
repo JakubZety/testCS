@@ -1,6 +1,7 @@
 package com.test;
 
 import ch.qos.logback.classic.Logger;
+import com.test.domain.EventLogJson;
 import com.test.domain.EventLogRepository;
 import com.test.service.EventLogService;
 import org.apache.commons.io.FileUtils;
@@ -15,6 +16,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 import java.io.*;
+import java.util.HashMap;
+import java.util.concurrent.Semaphore;
 
 /**
  * Created by Jakub on 24.09.2019.
@@ -24,7 +27,7 @@ public class LogReader implements CommandLineRunner {
     @Autowired
     EventLogRepository eventLogRepository;
 
-    Logger logger = (Logger)LoggerFactory.getLogger(LogReader.class);
+    private Logger logger = (Logger)LoggerFactory.getLogger(LogReader.class);
 
     public static void main(String[] args) {
         SpringApplication.run(LogReader.class, args);
@@ -33,7 +36,7 @@ public class LogReader implements CommandLineRunner {
     @Override
     public void run(String... strings) throws Exception {
         if(strings.length > 0){
-            readFile(strings[1]);
+            readFile(strings[0]);
         }else{
             logger.error("Empty param string");
             throw new IllegalArgumentException("No path to log file.");
@@ -54,8 +57,9 @@ public class LogReader implements CommandLineRunner {
             while (lineIterator.hasNext()){
                 string = lineIterator.next();
                 try {
-                    JSONObject eventLogJson = (JSONObject) jsonParser.parse(string);
+                    EventLogJson eventLogJson = new EventLogJson((JSONObject) jsonParser.parse(string));
                     logger.debug("Read JSON from file : " + eventLogJson.toJSONString());
+
                     //EventLogService.processLogEntry(eventLogJson, eventLogRepository);
                     (new Thread(new ProcessLogEntryRunnable(eventLogJson))).start();
                 } catch (ParseException e) {
@@ -69,15 +73,27 @@ public class LogReader implements CommandLineRunner {
         logger.debug("Finished reading file");
     }
 
+    private final HashMap<String,Semaphore> mapOfSemaphores = new HashMap<>();
+
     private class ProcessLogEntryRunnable implements Runnable{
-        JSONObject eventLogJson;
-        public ProcessLogEntryRunnable(JSONObject eventLogJson){
+        EventLogJson eventLogJson;
+        public ProcessLogEntryRunnable(EventLogJson eventLogJson){
             this.eventLogJson = eventLogJson;
         }
         @Override
         public void run() {
             try {
+                boolean toRemove = false;
+                if (mapOfSemaphores.containsKey(eventLogJson.getId())){
+                    mapOfSemaphores.get(eventLogJson.getId()).acquire();
+                    toRemove = true;
+                }else{
+                    mapOfSemaphores.put(eventLogJson.getId(), new Semaphore(0));
+                }
                 EventLogService.processLogEntry(eventLogJson, eventLogRepository);
+                mapOfSemaphores.get(eventLogJson.getId()).release();
+                if(toRemove)
+                    mapOfSemaphores.remove(eventLogJson.getId());
             } catch (InterruptedException e) {
                 //e.printStackTrace();
                 logger.error(e.toString());

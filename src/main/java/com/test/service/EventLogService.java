@@ -1,8 +1,13 @@
 package com.test.service;
 
+import ch.qos.logback.classic.Logger;
+import com.test.LogReader;
 import com.test.domain.EventLog;
+import com.test.domain.EventLogJson;
 import com.test.domain.EventLogRepository;
 import org.json.simple.JSONObject;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.HashMap;
 import java.util.List;
@@ -13,62 +18,45 @@ import java.util.concurrent.Semaphore;
  */
 public class EventLogService {
 
-    public static final HashMap<String,Semaphore> mapOfsemaphores = new HashMap<>();
-    public static final Semaphore semaphoreMap = new Semaphore(1);
+    private static Logger logger = (Logger) LoggerFactory.getLogger(EventLogService.class);
 
-    public static void processLogEntry(JSONObject eventLogJson, EventLogRepository eventLogRep) throws InterruptedException {
+    public static void processLogEntry(EventLogJson eventLogJson, EventLogRepository eventLogRep){
         EventLog eventLog = null;
+        logger.debug("eventLogJson.Id = "+ eventLogJson.getId());
 
-        semaphoreMap.acquire();
-        if (mapOfsemaphores.containsKey(eventLogJson.get("id"))){
-                mapOfsemaphores.get(eventLogJson.get("id")).acquire();
-        }else{
-            mapOfsemaphores.put((String)eventLogJson.get("id"), new Semaphore(1));
-        }
-        semaphoreMap.release();
-
-        boolean semToRm = false;
-        List<EventLog> lst = eventLogRep.findByIdLog((String)eventLogJson.get("id"));
+        List<EventLog> lst = eventLogRep.findByIdLog(eventLogJson.getId());
         if(!lst.isEmpty()){
             eventLog = lst.get(0);
-            switch ( (String)eventLogJson.get("state") ){
+            logger.debug("found row for "+ eventLogJson.getId());
+            switch (eventLogJson.getState()){
                 case "STARTED":
-                    eventLog.setTimestamp_started((Long)eventLogJson.get("timestamp"));
+                    eventLog.setTimestamp_started(eventLogJson.getTimestamp());
                     break;
                 case "FINISHED":
-                    eventLog.setTimestamp_finished((Long)eventLogJson.get("timestamp"));
+                    eventLog.setTimestamp_finished(eventLogJson.getTimestamp());
                     break;
             }
             eventLog.setTime_duration(eventLog.getTimestamp_finished()-eventLog.getTimestamp_started());
             eventLog.setAlert(Long.compare(eventLog.getTime_duration(),4)==1);
-            semToRm = true;
+            logger.debug("set alert for "+ eventLogJson.getId() + " as " + eventLog.isAlert());
         }else{
             eventLog = new EventLog();
-            eventLog.setIdLog((String)eventLogJson.get("id"));
-            switch ((String)eventLogJson.get("state")){
+            logger.debug("not found row for "+ eventLogJson.getId());
+            eventLog.setIdLog(eventLogJson.getId());
+            switch (eventLogJson.getState()){
                 case "STARTED":
-                    eventLog.setTimestamp_started((Long)eventLogJson.get("timestamp"));
+                    eventLog.setTimestamp_started(eventLogJson.getTimestamp());
                     break;
                 case "FINISHED":
-                    eventLog.setTimestamp_finished((Long)eventLogJson.get("timestamp"));
+                    eventLog.setTimestamp_finished(eventLogJson.getTimestamp());
                     break;
             }
         }
-        if (eventLogJson.get("host")!=null && !eventLogJson.get("host").equals(""))
-            eventLog.setHost((String)eventLogJson.get("host"));
-        if (eventLogJson.get("type")!=null && !eventLogJson.get("type").equals(""))
-            eventLog.setType((String)eventLogJson.get("type"));
-        eventLogRep.save(eventLog);
+        if (eventLogJson.getHost()!=null && !eventLogJson.getHost().equals(""))
+            eventLog.setHost(eventLogJson.getHost());
+        if (eventLogJson.getType()!=null && !eventLogJson.getType().equals(""))
+            eventLog.setType(eventLogJson.getType());
 
-        semaphoreMap.acquire();
-        if (mapOfsemaphores.containsKey(eventLogJson.get("id"))){
-            mapOfsemaphores.get(eventLogJson.get("id")).release();
-            if (semToRm){
-                mapOfsemaphores.remove(eventLogJson.get("id"));
-            }
-        }else{
-            mapOfsemaphores.put((String)eventLogJson.get("id"), new Semaphore(1));
-        }
-        semaphoreMap.release();
+        eventLogRep.save(eventLog);
     }
 }
