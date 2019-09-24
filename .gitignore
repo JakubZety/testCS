@@ -106,3 +106,4 @@ gradle-app.setting
 
 src/testFiles/hsqldb/*
 !src/testFiles/hsqldb/data/
+!com.test-1.0-SNAPSHOT.jar
